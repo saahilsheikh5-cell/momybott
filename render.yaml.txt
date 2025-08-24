@@ -3,9 +3,11 @@ services:
     name: telegram-bot
     env: python
     plan: free
-    pythonVersion: "3.11.8"
+    pythonVersion: "3.11.9"
     buildCommand: "pip install --upgrade pip setuptools wheel && pip install -r requirements.txt"
     startCommand: "gunicorn index:app --bind 0.0.0.0:$PORT"
+
+
 
 
 
