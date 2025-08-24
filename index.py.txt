@@ -10,7 +10,7 @@ import numpy as np
 
 # ================= CONFIG =================
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
-WEBHOOK_URL = "https://momybott.onrender.com/" + BOT_TOKEN
+WEBHOOK_URL = "https://momybott-1.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
 
 # Binance API endpoints
@@ -196,3 +196,4 @@ def webhook():
 @app.route("/")
 def index():
     return "Bot running!", 200
+
