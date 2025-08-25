@@ -1,6 +1,9 @@
-flask
-pytelegrambotapi
+Flask
 gunicorn
+pyTelegramBotAPI
+requests
+numpy
+pandas
 
 
 
