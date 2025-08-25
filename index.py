@@ -3,55 +3,45 @@ import telebot
 import requests
 import time
 import threading
-import numpy as np
-import pandas as pd
 from flask import Flask, request
-from telebot import types
 
 # === CONFIG ===
-BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
-WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
-CHAT_ID = 1263295916
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://momybott-4.onrender.com/" + BOT_TOKEN)
+CHAT_ID = int(os.getenv("CHAT_ID", "1263295916"))
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 
-# === Startup logic replacement for Flask 3.1+ ===
-def run_startup_task():
-    # Put any startup logic you had in before_first_request
-    print(">>> Startup task running...")
+# === TELEGRAM HANDLERS ===
+@bot.message_handler(commands=["start"])
+def send_welcome(message):
+    bot.reply_to(message, "🤖 Bot is running on Render!")
 
-@app.before_request
-def activate_job():
-    if not hasattr(app, 'job_started'):
-        app.job_started = True
-        threading.Thread(target=run_startup_task).start()
+# Example background task
+def background_worker():
+    while True:
+        try:
+            bot.send_message(CHAT_ID, "✅ Bot is alive and running!")
+        except Exception as e:
+            print("Error sending message:", e)
+        time.sleep(60)  # every 1 minute
 
-# === Routes ===
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+# === FLASK ROUTES ===
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode('UTF-8')
+    json_str = request.get_data().decode("UTF-8")
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
-    return "!", 200
+    return "OK", 200
 
-@app.route('/')
+@app.route("/")
 def index():
     return "Bot is running!", 200
 
-# === Example Bot Handler ===
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "👋 Hello! I am alive and working on Render!")
-
-# === Start webhook ===
-def start_bot():
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=WEBHOOK_URL)
-
+# === STARTUP ===
 if __name__ == "__main__":
-    start_bot()
+    # Start background worker thread
+    threading.Thread(target=background_worker, daemon=True).start()
+    # Start Flask app
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-
