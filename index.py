@@ -153,7 +153,7 @@ def process_remove_coin(msg):
     else:
         bot.send_message(msg.chat.id,"Coin not found.")
 
-# --- Auto Signals Toggle ---
+# --- Auto Signals ---
 @bot.message_handler(func=lambda m: m.text=="🤖 Auto Signals")
 def enable_signals(msg):
     global auto_signals_enabled
@@ -180,7 +180,7 @@ def reset_settings(msg):
     save_json(COIN_INTERVALS_FILE,coin_intervals)
     bot.send_message(msg.chat.id,"🔄 All settings reset.")
 
-# --- Signals Command ---
+# --- Signals ---
 @bot.message_handler(func=lambda m: m.text=="📡 Signals")
 def signals(msg):
     active_coins = coins if coins else ["BTCUSDT","ETHUSDT","SOLUSDT"]
@@ -218,7 +218,7 @@ def process_preview_signal(msg):
     else:
         bot.send_message(msg.chat.id,f"📊 Preview Signals for {coin}:\n"+"\n".join(signals_list))
 
-# --- Coin Intervals Menu ---
+# --- Coin Intervals ---
 @bot.message_handler(func=lambda m: m.text=="⏱ Coin Intervals")
 def coin_intervals_menu(msg):
     if not coins:
@@ -246,7 +246,7 @@ def save_coin_intervals(coin, text):
     else:
         bot.send_message(CHAT_ID,"⚠️ Invalid input. No changes made.")
 
-# --- Settings Command ---
+# --- Settings ---
 @bot.message_handler(func=lambda m: m.text=="⚙️ Settings")
 def settings_menu(msg):
     bot.send_message(msg.chat.id,f"Current settings:\nRSI Buy Threshold: {settings['rsi_buy']}\nRSI Sell Threshold: {settings['rsi_sell']}\nSignal Validity (min): {settings['signal_validity_min']}\n\nSend as: buy,sell,validity (e.g., 20,80,15)")
