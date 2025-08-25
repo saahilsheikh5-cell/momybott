@@ -5,16 +5,15 @@ import pandas as pd
 import threading
 import time
 import json
+import numpy as np
 from telebot import types
 from flask import Flask, request
-import numpy as np
 
 # ================= CONFIG =================
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
 WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
 
-# Binance API endpoints
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -22,27 +21,28 @@ app = Flask(__name__)
 
 # ================= STORAGE =================
 USER_COINS_FILE = "user_coins.json"
+SETTINGS_FILE = "settings.json"
+SENT_SIGNALS_FILE = "sent_signals.json"
 
-def load_data():
-    if not os.path.exists(USER_COINS_FILE):
-        return {"coins": [], "settings": {"rsi_buy": 25, "rsi_sell": 75, "coin_intervals": {}}}
-    with open(USER_COINS_FILE, "r") as f:
+TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
+
+def load_json(file, default):
+    if not os.path.exists(file):
+        return default
+    with open(file, "r") as f:
         return json.load(f)
 
-def save_data(data):
-    with open(USER_COINS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
 
-data_store = load_data()
+coins = load_json(USER_COINS_FILE, [])
+settings = load_json(SETTINGS_FILE, {"RSI_BUY": 15, "RSI_SELL": 85})
+sent_signals = load_json(SENT_SIGNALS_FILE, {})
 
-def load_coins():
-    return data_store.get("coins", [])
-
-def save_coins(coins):
-    data_store["coins"] = coins
-    save_data(data_store)
-
-settings = data_store.get("settings", {"rsi_buy": 25, "rsi_sell": 75, "coin_intervals": {}})
+def save_coins(): save_json(USER_COINS_FILE, coins)
+def save_settings(): save_json(SETTINGS_FILE, settings)
+def save_sent(): save_json(SENT_SIGNALS_FILE, sent_signals)
 
 # ================= TECHNICAL ANALYSIS =================
 def get_klines(symbol, interval="15m", limit=100):
@@ -60,48 +60,42 @@ def rsi(data, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def generate_signal(symbol):
+def generate_signal(symbol, timeframe="15m"):
     try:
-        interval = settings['coin_intervals'].get(symbol, "15m")
-        closes = get_klines(symbol, interval, 100)
-        if len(closes) < 20:
-            return None
+        closes = get_klines(symbol, timeframe, 100)
+        if len(closes) < 20: return None
         last_close = closes[-1]
         rsi_val = rsi(closes)[-1]
 
-        if rsi_val < settings['rsi_buy']:
-            return f"🟢 STRONG BUY {symbol} | RSI {rsi_val:.2f} | Price {last_close}"
-        elif rsi_val > settings['rsi_sell']:
-            return f"🔴 STRONG SELL {symbol} | RSI {rsi_val:.2f} | Price {last_close}"
+        if rsi_val < settings["RSI_BUY"]:
+            return f"🟢 STRONG BUY {symbol} ({timeframe}) | RSI {rsi_val:.2f} | Price {last_close}"
+        elif rsi_val > settings["RSI_SELL"]:
+            return f"🔴 STRONG SELL {symbol} ({timeframe}) | RSI {rsi_val:.2f} | Price {last_close}"
         return None
-    except Exception:
+    except:
         return None
 
 # ================= BACKGROUND SIGNALS =================
 auto_signals_enabled = True
-active_signals = {}  # { "BTCUSDT": expiry_timestamp }
 
 def signal_scanner():
     while True:
         if auto_signals_enabled:
-            coins = load_coins() or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
-            now = time.time()
-            for c in coins:
-                interval = settings['coin_intervals'].get(c, "15m")
-                sig = generate_signal(c)
-                if sig and (c not in active_signals or active_signals[c] < now):
-                    # Set validity based on interval
-                    validity_seconds = {
-                        "1m": 60,
-                        "5m": 5*60,
-                        "15m": 15*60,
-                        "1h": 60*60,
-                        "4h": 4*60*60,
-                        "1d": 24*60*60
-                    }.get(interval, 15*60)  # default 15m
-                    active_signals[c] = now + validity_seconds
-                    bot.send_message(CHAT_ID, f"⚡ {sig} | Valid for {validity_seconds//60} min")
-        time.sleep(30)
+            for coin in coins:
+                for tf in TIMEFRAMES:
+                    sig = generate_signal(coin, tf)
+                    last_sent = sent_signals.get(coin, {}).get(tf)
+                    if sig:
+                        if last_sent != sig:
+                            bot.send_message(CHAT_ID, f"⚡ {sig}")
+                            if coin not in sent_signals: sent_signals[coin] = {}
+                            sent_signals[coin][tf] = sig
+                    else:
+                        # Clear last signal if it’s no longer valid
+                        if coin in sent_signals and tf in sent_signals[coin]:
+                            del sent_signals[coin][tf]
+            save_sent()
+        time.sleep(60)
 
 threading.Thread(target=signal_scanner, daemon=True).start()
 
@@ -111,23 +105,20 @@ def start(msg):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("📊 My Coins", "➕ Add Coin")
     markup.add("➖ Remove Coin", "🤖 Auto Signals")
-    markup.add("🛑 Stop Signals", "🔄 Reset Settings")
-    markup.add("📡 Signals", "⚙️ Settings")
+    markup.add("🛑 Stop Signals", "✅ Resume Signals")
+    markup.add("⚙️ Settings", "🔄 Reset Settings", "📡 Signals")
     bot.send_message(msg.chat.id, "🤖 Welcome! Choose an option:", reply_markup=markup)
 
 # --- My Coins ---
 @bot.message_handler(func=lambda m: m.text == "📊 My Coins")
 def my_coins(msg):
-    coins = load_coins()
     if not coins:
         bot.send_message(msg.chat.id, "⚠️ No coins saved. Use ➕ Add Coin.")
         return
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for coin in coins:
-        markup.add(coin)
+    for coin in coins: markup.add(coin)
     bot.send_message(msg.chat.id, "📊 Select a coin:", reply_markup=markup)
 
-# --- Add Coin ---
 @bot.message_handler(func=lambda m: m.text == "➕ Add Coin")
 def add_coin(msg):
     bot.send_message(msg.chat.id, "Type coin symbol (e.g., BTCUSDT):")
@@ -135,38 +126,32 @@ def add_coin(msg):
 
 def process_add_coin(msg):
     coin = msg.text.upper()
-    coins = load_coins()
     if coin not in coins:
         coins.append(coin)
-        save_coins(coins)
+        save_coins()
         bot.send_message(msg.chat.id, f"✅ {coin} added.")
     else:
         bot.send_message(msg.chat.id, f"{coin} already exists.")
 
-# --- Remove Coin ---
 @bot.message_handler(func=lambda m: m.text == "➖ Remove Coin")
 def remove_coin(msg):
-    coins = load_coins()
     if not coins:
         bot.send_message(msg.chat.id, "⚠️ No coins to remove.")
         return
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for coin in coins:
-        markup.add(coin)
+    for coin in coins: markup.add(coin)
     bot.send_message(msg.chat.id, "Select coin to remove:", reply_markup=markup)
     bot.register_next_step_handler(msg, process_remove_coin)
 
 def process_remove_coin(msg):
     coin = msg.text.upper()
-    coins = load_coins()
     if coin in coins:
         coins.remove(coin)
-        save_coins(coins)
+        save_coins()
         bot.send_message(msg.chat.id, f"❌ {coin} removed.")
-    else:
-        bot.send_message(msg.chat.id, "Coin not found.")
+    else: bot.send_message(msg.chat.id, "Coin not found.")
 
-# --- Auto Signals Toggle ---
+# --- Auto Signals ---
 @bot.message_handler(func=lambda m: m.text == "🤖 Auto Signals")
 def enable_signals(msg):
     global auto_signals_enabled
@@ -175,56 +160,89 @@ def enable_signals(msg):
 
 @bot.message_handler(func=lambda m: m.text == "🛑 Stop Signals")
 def stop_signals(msg):
-    global auto_signals_enabled, active_signals
+    global auto_signals_enabled
     auto_signals_enabled = False
-    active_signals.clear()
-    bot.send_message(msg.chat.id, "⛔ Auto signals and active signals STOPPED.")
+    bot.send_message(msg.chat.id, "⛔ Auto signals DISABLED.")
+
+@bot.message_handler(func=lambda m: m.text == "✅ Resume Signals")
+def resume_signals(msg):
+    global auto_signals_enabled
+    auto_signals_enabled = True
+    bot.send_message(msg.chat.id, "✅ Auto signals RESUMED.")
+
+# --- Settings ---
+@bot.message_handler(func=lambda m: m.text == "⚙️ Settings")
+def settings_menu(msg):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(f"🔺 RSI Buy ({settings['RSI_BUY']})", f"🔻 RSI Sell ({settings['RSI_SELL']})")
+    markup.add("⬅️ Back")
+    bot.send_message(msg.chat.id, "⚙️ Adjust Settings:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text.startswith("🔺 RSI Buy"))
+def adjust_rsi_buy(msg):
+    bot.send_message(msg.chat.id, "Type new RSI Buy threshold (5-50):")
+    bot.register_next_step_handler(msg, set_rsi_buy)
+
+def set_rsi_buy(msg):
+    try:
+        val = int(msg.text)
+        if 5 <= val <= 50:
+            settings["RSI_BUY"] = val
+            save_settings()
+            bot.send_message(msg.chat.id, f"✅ RSI Buy set to {val}")
+        else:
+            bot.send_message(msg.chat.id, "⚠️ Value out of range.")
+    except:
+        bot.send_message(msg.chat.id, "⚠️ Invalid input.")
+
+@bot.message_handler(func=lambda m: m.text.startswith("🔻 RSI Sell"))
+def adjust_rsi_sell(msg):
+    bot.send_message(msg.chat.id, "Type new RSI Sell threshold (50-95):")
+    bot.register_next_step_handler(msg, set_rsi_sell)
+
+def set_rsi_sell(msg):
+    try:
+        val = int(msg.text)
+        if 50 <= val <= 95:
+            settings["RSI_SELL"] = val
+            save_settings()
+            bot.send_message(msg.chat.id, f"✅ RSI Sell set to {val}")
+        else:
+            bot.send_message(msg.chat.id, "⚠️ Value out of range.")
+    except:
+        bot.send_message(msg.chat.id, "⚠️ Invalid input.")
 
 # --- Reset ---
 @bot.message_handler(func=lambda m: m.text == "🔄 Reset Settings")
 def reset_settings(msg):
-    save_coins([])
-    data_store["settings"] = {"rsi_buy": 25, "rsi_sell": 75, "coin_intervals": {}}
-    save_data(data_store)
+    global coins, settings, sent_signals
+    coins = []
+    settings = {"RSI_BUY": 15, "RSI_SELL": 85}
+    sent_signals = {}
+    save_coins(); save_settings(); save_sent()
     bot.send_message(msg.chat.id, "🔄 Settings reset. All coins cleared.")
 
 # --- Signals Command ---
 @bot.message_handler(commands=["signals"])
 @bot.message_handler(func=lambda m: m.text == "📡 Signals")
 def signals(msg):
-    coins = load_coins() or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"]
+    if not coins:
+        bot.send_message(msg.chat.id, "⚡ No coins saved.")
+        return
     strong_signals = []
-    for c in coins:
-        sig = generate_signal(c)
-        if sig:
-            strong_signals.append(sig)
+    for coin in coins:
+        for tf in TIMEFRAMES:
+            sig = generate_signal(coin, tf)
+            last_sent = sent_signals.get(coin, {}).get(tf)
+            if sig and last_sent != sig:
+                strong_signals.append(sig)
+                if coin not in sent_signals: sent_signals[coin] = {}
+                sent_signals[coin][tf] = sig
+    save_sent()
     if not strong_signals:
         bot.send_message(msg.chat.id, "⚡ No strong signals right now.")
     else:
         bot.send_message(msg.chat.id, "📡 Ultra-Filtered Signals:\n\n" + "\n".join(strong_signals))
-
-# --- Settings Command ---
-@bot.message_handler(func=lambda m: m.text == "⚙️ Settings")
-def settings_handler(msg):
-    bot.send_message(msg.chat.id, "Current RSI thresholds:\n"
-                     f"Buy: {settings['rsi_buy']}\n"
-                     f"Sell: {settings['rsi_sell']}\n"
-                     "You can change them by typing:\n"
-                     "Buy=VALUE Sell=VALUE")
-    bot.register_next_step_handler(msg, process_settings)
-
-def process_settings(msg):
-    try:
-        text = msg.text.replace(" ", "")
-        parts = text.split("Sell=")
-        buy_val = int(parts[0].split("Buy=")[1])
-        sell_val = int(parts[1])
-        settings['rsi_buy'] = buy_val
-        settings['rsi_sell'] = sell_val
-        save_data(data_store)
-        bot.send_message(msg.chat.id, f"✅ Settings updated: Buy={buy_val}, Sell={sell_val}")
-    except Exception:
-        bot.send_message(msg.chat.id, "⚠️ Invalid format. Use: Buy=VALUE Sell=VALUE")
 
 # ================= FLASK (WEBHOOK) =================
 @app.route("/" + BOT_TOKEN, methods=["POST"])
@@ -242,5 +260,7 @@ if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+
 
 
