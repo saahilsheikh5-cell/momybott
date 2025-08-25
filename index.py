@@ -11,6 +11,7 @@ import numpy as np
 
 # ================= CONFIG =================
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
+WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
@@ -98,6 +99,7 @@ def signal_scanner():
 threading.Thread(target=signal_scanner, daemon=True).start()
 
 # ================= BOT COMMANDS =================
+
 @bot.message_handler(commands=["start"])
 def start(msg):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -265,22 +267,32 @@ def update_settings(msg):
         bot.send_message(msg.chat.id,"⚠️ Invalid format. Send as: buy,sell,validity")
 
 # ================= FLASK WEBHOOK =================
+@app.route("/"+BOT_TOKEN,methods=["POST"])
+def webhook():
+    json_str=request.get_data().decode("UTF-8")
+    update=telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK",200
+
 @app.route("/")
 def index():
     return "Bot running!",200
 
-# --- Notify Admin ---
+# --- Notify Admin Bot is Live ---
 def notify_bot_live():
     try:
         bot.send_message(CHAT_ID, "✅ Bot deployed and running!")
     except Exception as e:
         print(f"Failed to send startup message: {e}")
 
+# ================= RUN BOT =================
 if __name__=="__main__":
-    notify_bot_live()
-    # Polling ensures immediate response
     bot.remove_webhook()
-    bot.infinity_polling()
+    bot.set_webhook(url=WEBHOOK_URL)
+    notify_bot_live()
+    port=int(os.environ.get("PORT",10000))
+    app.run(host="0.0.0.0",port=port)
+
 
 
 
