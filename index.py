@@ -13,7 +13,6 @@ import numpy as np
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
 WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
-
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -69,7 +68,9 @@ def generate_signal(symbol, interval):
         elif rsi_val>settings["rsi_sell"]:
             return f"🔴 STRONG SELL {symbol} | RSI {rsi_val:.2f} | Price {last_close} | Valid {settings['signal_validity_min']}min"
         return None
-    except: return None
+    except Exception as e:
+        print(f"Error generating signal for {symbol}: {e}")
+        return None
 
 # ================= SIGNAL MANAGEMENT =================
 auto_signals_enabled = True
@@ -194,55 +195,56 @@ def signals(msg):
     else:
         bot.send_message(msg.chat.id,"📡 Ultra-Filtered Signals:\n\n"+"\n".join(strong_signals))
 
-# --- Mute/Unmute Coin ---
-@bot.message_handler(func=lambda m: m.text=="🔇 Mute Coin")
-def mute_coin(msg):
+# --- Preview Signal ---
+@bot.message_handler(func=lambda m: m.text=="🔍 Preview Signal")
+def preview_signal(msg):
     if not coins:
         bot.send_message(msg.chat.id,"⚠️ No coins available.")
         return
-    markup=types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for c in coins: markup.add(c)
-    bot.send_message(msg.chat.id,"Select coin to mute:",reply_markup=markup)
-    bot.register_next_step_handler(msg,process_mute_coin)
+    bot.send_message(msg.chat.id,"Select coin to preview:",reply_markup=markup)
+    bot.register_next_step_handler(msg,process_preview_signal)
 
-def process_mute_coin(msg):
-    coin=msg.text.upper()
-    if coin not in muted_coins: muted_coins.append(coin)
-    save_json(MUTED_COINS_FILE,muted_coins)
-    bot.send_message(msg.chat.id,f"🔇 {coin} muted.")
+def process_preview_signal(msg):
+    coin = msg.text.upper()
+    intervals = coin_intervals.get(coin, ["1m","5m","15m","1h","4h","1d"])
+    signals_list = []
+    for interval in intervals:
+        sig = generate_signal(coin, interval)
+        if sig: signals_list.append(sig)
+    if not signals_list:
+        bot.send_message(msg.chat.id,f"⚡ No strong signals for {coin} now.")
+    else:
+        bot.send_message(msg.chat.id,f"📊 Preview Signals for {coin}:\n"+"\n".join(signals_list))
 
-@bot.message_handler(func=lambda m: m.text=="🔔 Unmute Coin")
-def unmute_coin(msg):
-    if not muted_coins:
-        bot.send_message(msg.chat.id,"⚠️ No muted coins.")
+# --- Coin Intervals Menu ---
+@bot.message_handler(func=lambda m: m.text=="⏱ Coin Intervals")
+def coin_intervals_menu(msg):
+    if not coins:
+        bot.send_message(msg.chat.id,"⚠️ No coins available.")
         return
-    markup=types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for c in muted_coins: markup.add(c)
-    bot.send_message(msg.chat.id,"Select coin to unmute:",reply_markup=markup)
-    bot.register_next_step_handler(msg,process_unmute_coin)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in coins: markup.add(c)
+    bot.send_message(msg.chat.id,"Select coin to set intervals (comma separated, e.g., 1m,5m,15m):",reply_markup=markup)
+    bot.register_next_step_handler(msg,process_coin_intervals)
 
-def process_unmute_coin(msg):
-    coin=msg.text.upper()
-    if coin in muted_coins: muted_coins.remove(coin)
-    save_json(MUTED_COINS_FILE,muted_coins)
-    bot.send_message(msg.chat.id,f"🔔 {coin} unmuted.")
+def process_coin_intervals(msg):
+    coin = msg.text.upper()
+    if coin not in coins:
+        bot.send_message(msg.chat.id,"⚠️ Coin not found.")
+        return
+    bot.send_message(msg.chat.id,"Send intervals separated by commas (e.g., 1m,5m,15m,1h,4h,1d):")
+    bot.register_next_step_handler(msg, lambda m: save_coin_intervals(coin, m.text))
 
-# --- Settings Command ---
-@bot.message_handler(func=lambda m: m.text=="⚙️ Settings")
-def settings_menu(msg):
-    bot.send_message(msg.chat.id,f"Current settings:\nRSI Buy Threshold: {settings['rsi_buy']}\nRSI Sell Threshold: {settings['rsi_sell']}\nSignal Validity (min): {settings['signal_validity_min']}\n\nSend as: buy,sell,validity (e.g., 20,80,15)")
-    bot.register_next_step_handler(msg,update_settings)
-
-def update_settings(msg):
-    try:
-        parts=[int(x.strip()) for x in msg.text.split(",")]
-        settings["rsi_buy"]=parts[0]
-        settings["rsi_sell"]=parts[1]
-        settings["signal_validity_min"]=parts[2]
-        save_json(SETTINGS_FILE,settings)
-        bot.send_message(msg.chat.id,"✅ Settings updated.")
-    except:
-        bot.send_message(msg.chat.id,"⚠️ Invalid format. Send as: buy,sell,validity")
+def save_coin_intervals(coin, text):
+    intervals = [x.strip() for x in text.split(",") if x.strip()]
+    if intervals:
+        coin_intervals[coin] = intervals
+        save_json(COIN_INTERVALS_FILE,coin_intervals)
+        bot.send_message(CHAT_ID,f"✅ Intervals for {coin} updated: {','.join(intervals)}")
+    else:
+        bot.send_message(CHAT_ID,"⚠️ Invalid input. No changes made.")
 
 # ================= FLASK WEBHOOK =================
 @app.route("/"+BOT_TOKEN,methods=["POST"])
