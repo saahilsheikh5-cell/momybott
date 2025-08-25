@@ -6,17 +6,14 @@ import threading
 import time
 import json
 from telebot import types
-from flask import Flask, request
 import numpy as np
 
 # ================= CONFIG =================
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
-WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
 
 # ================= STORAGE =================
 USER_COINS_FILE = "user_coins.json"
@@ -110,41 +107,147 @@ def start(msg):
     markup.add("⏱ Coin Intervals")
     bot.send_message(msg.chat.id,"🤖 Welcome! Choose an option:",reply_markup=markup)
 
-# --- (All other bot commands remain unchanged, exactly as you provided) ---
+# --- My Coins ---
+@bot.message_handler(func=lambda m: m.text=="📊 My Coins")
+def my_coins(msg):
+    if not coins:
+        bot.send_message(msg.chat.id,"⚠️ No coins saved. Use ➕ Add Coin.")
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in coins: markup.add(c)
+    bot.send_message(msg.chat.id,"📊 Select a coin:",reply_markup=markup)
 
-# ================= FLASK WEBHOOK =================
-@app.route("/"+BOT_TOKEN,methods=["POST"])
-def webhook():
-    json_str=request.get_data().decode("UTF-8")
-    update=telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK",200
+@bot.message_handler(func=lambda m: m.text=="➕ Add Coin")
+def add_coin(msg):
+    bot.send_message(msg.chat.id,"Type coin symbol (e.g., BTCUSDT):")
+    bot.register_next_step_handler(msg, process_add_coin)
 
-@app.route("/")
-def index():
-    return "Bot running!",200
-
-# ================= MAIN ENTRY =================
-if __name__=="__main__":
-    # Detect if running on Render and use polling
-    # This ensures /start works immediately
-    try:
-        import socket
-        s = socket.socket()
-        s.connect(("api.telegram.org", 443))
-        s.close()
-        use_polling = True
-    except:
-        use_polling = False
-
-    if use_polling:
-        print("Bot polling started...")
-        bot.infinity_polling()
+def process_add_coin(msg):
+    coin = msg.text.upper()
+    if coin not in coins:
+        coins.append(coin)
+        save_json(USER_COINS_FILE,coins)
+        bot.send_message(msg.chat.id,f"✅ {coin} added.")
     else:
-        # webhook mode
-        bot.remove_webhook()
-        bot.set_webhook(url=WEBHOOK_URL)
-        app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+        bot.send_message(msg.chat.id,f"{coin} already exists.")
+
+@bot.message_handler(func=lambda m: m.text=="➖ Remove Coin")
+def remove_coin(msg):
+    if not coins:
+        bot.send_message(msg.chat.id,"⚠️ No coins to remove.")
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in coins: markup.add(c)
+    bot.send_message(msg.chat.id,"Select coin to remove:",reply_markup=markup)
+    bot.register_next_step_handler(msg,process_remove_coin)
+
+def process_remove_coin(msg):
+    coin = msg.text.upper()
+    if coin in coins:
+        coins.remove(coin)
+        save_json(USER_COINS_FILE,coins)
+        bot.send_message(msg.chat.id,f"❌ {coin} removed.")
+    else:
+        bot.send_message(msg.chat.id,"Coin not found.")
+
+# --- Auto Signals Toggle ---
+@bot.message_handler(func=lambda m: m.text=="🤖 Auto Signals")
+def enable_signals(msg):
+    global auto_signals_enabled
+    auto_signals_enabled=True
+    bot.send_message(msg.chat.id,"✅ Auto signals ENABLED.")
+
+@bot.message_handler(func=lambda m: m.text=="🛑 Stop Signals")
+def stop_signals(msg):
+    global auto_signals_enabled
+    auto_signals_enabled=False
+    bot.send_message(msg.chat.id,"⛔ Auto signals DISABLED.")
+
+# --- Reset ---
+@bot.message_handler(func=lambda m: m.text=="🔄 Reset Settings")
+def reset_settings(msg):
+    global coins, last_signals, muted_coins, coin_intervals
+    coins=[]
+    last_signals={}
+    muted_coins=[]
+    coin_intervals={}
+    save_json(USER_COINS_FILE,coins)
+    save_json(LAST_SIGNAL_FILE,last_signals)
+    save_json(MUTED_COINS_FILE,muted_coins)
+    save_json(COIN_INTERVALS_FILE,coin_intervals)
+    bot.send_message(msg.chat.id,"🔄 All settings reset.")
+
+# --- Signals Command ---
+@bot.message_handler(func=lambda m: m.text=="📡 Signals")
+def signals(msg):
+    active_coins = coins if coins else ["BTCUSDT","ETHUSDT","SOLUSDT"]
+    strong_signals=[]
+    for c in active_coins:
+        intervals = coin_intervals.get(c, ["1m","5m","15m","1h","4h","1d"])
+        for interval in intervals:
+            sig=generate_signal(c,interval)
+            if sig: strong_signals.append(sig)
+    if not strong_signals:
+        bot.send_message(msg.chat.id,"⚡ No strong signals right now.")
+    else:
+        bot.send_message(msg.chat.id,"📡 Ultra-Filtered Signals:\n\n"+"\n".join(strong_signals))
+
+# --- Preview Signal ---
+@bot.message_handler(func=lambda m: m.text=="🔍 Preview Signal")
+def preview_signal(msg):
+    if not coins:
+        bot.send_message(msg.chat.id,"⚠️ No coins available.")
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in coins: markup.add(c)
+    bot.send_message(msg.chat.id,"Select coin to preview:",reply_markup=markup)
+    bot.register_next_step_handler(msg,process_preview_signal)
+
+def process_preview_signal(msg):
+    coin = msg.text.upper()
+    intervals = coin_intervals.get(coin, ["1m","5m","15m","1h","4h","1d"])
+    signals_list = []
+    for interval in intervals:
+        sig = generate_signal(coin, interval)
+        if sig: signals_list.append(sig)
+    if not signals_list:
+        bot.send_message(msg.chat.id,f"⚡ No strong signals for {coin} now.")
+    else:
+        bot.send_message(msg.chat.id,f"📊 Preview Signals for {coin}:\n"+"\n".join(signals_list))
+
+# --- Coin Intervals Menu ---
+@bot.message_handler(func=lambda m: m.text=="⏱ Coin Intervals")
+def coin_intervals_menu(msg):
+    if not coins:
+        bot.send_message(msg.chat.id,"⚠️ No coins available.")
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in coins: markup.add(c)
+    bot.send_message(msg.chat.id,"Select coin to set intervals (comma separated, e.g., 1m,5m,15m):",reply_markup=markup)
+    bot.register_next_step_handler(msg,process_coin_intervals)
+
+def process_coin_intervals(msg):
+    coin = msg.text.upper()
+    if coin not in coins:
+        bot.send_message(msg.chat.id,"⚠️ Coin not found.")
+        return
+    bot.send_message(msg.chat.id,"Send intervals separated by commas (e.g., 1m,5m,15m,1h,4h,1d):")
+    bot.register_next_step_handler(msg, lambda m: save_coin_intervals(coin, m.text))
+
+def save_coin_intervals(coin, text):
+    intervals = [x.strip() for x in text.split(",") if x.strip()]
+    if intervals:
+        coin_intervals[coin] = intervals
+        save_json(COIN_INTERVALS_FILE,coin_intervals)
+        bot.send_message(CHAT_ID,f"✅ Intervals for {coin} updated: {','.join(intervals)}")
+    else:
+        bot.send_message(CHAT_ID,"⚠️ Invalid input. No changes made.")
+
+# ================= RUN BOT =================
+if __name__ == "__main__":
+    print("Bot running with polling...")
+    bot.remove_webhook()
+    bot.infinity_polling()
 
 
 
