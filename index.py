@@ -11,7 +11,6 @@ import numpy as np
 
 # ================= CONFIG =================
 BOT_TOKEN = "7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q"
-WEBHOOK_URL = "https://momybott-4.onrender.com/" + BOT_TOKEN
 CHAT_ID = 1263295916
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
@@ -120,6 +119,7 @@ def my_coins(msg):
     for c in coins: markup.add(c)
     bot.send_message(msg.chat.id,"📊 Select a coin:",reply_markup=markup)
 
+# --- Add Coin ---
 @bot.message_handler(func=lambda m: m.text=="➕ Add Coin")
 def add_coin(msg):
     bot.send_message(msg.chat.id,"Type coin symbol (e.g., BTCUSDT):")
@@ -134,6 +134,7 @@ def process_add_coin(msg):
     else:
         bot.send_message(msg.chat.id,f"{coin} already exists.")
 
+# --- Remove Coin ---
 @bot.message_handler(func=lambda m: m.text=="➖ Remove Coin")
 def remove_coin(msg):
     if not coins:
@@ -166,7 +167,7 @@ def stop_signals(msg):
     auto_signals_enabled=False
     bot.send_message(msg.chat.id,"⛔ Auto signals DISABLED.")
 
-# --- Reset ---
+# --- Reset Settings ---
 @bot.message_handler(func=lambda m: m.text=="🔄 Reset Settings")
 def reset_settings(msg):
     global coins, last_signals, muted_coins, coin_intervals
@@ -264,18 +265,11 @@ def update_settings(msg):
         bot.send_message(msg.chat.id,"⚠️ Invalid format. Send as: buy,sell,validity")
 
 # ================= FLASK WEBHOOK =================
-@app.route("/"+BOT_TOKEN,methods=["POST"])
-def webhook():
-    json_str=request.get_data().decode("UTF-8")
-    update=telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK",200
-
 @app.route("/")
 def index():
     return "Bot running!",200
 
-# --- Notify Admin Bot is Live ---
+# --- Notify Admin ---
 def notify_bot_live():
     try:
         bot.send_message(CHAT_ID, "✅ Bot deployed and running!")
@@ -283,11 +277,11 @@ def notify_bot_live():
         print(f"Failed to send startup message: {e}")
 
 if __name__=="__main__":
-    bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
     notify_bot_live()
-    port=int(os.environ.get("PORT",10000))
-    app.run(host="0.0.0.0",port=port)
+    # Polling ensures immediate response
+    bot.remove_webhook()
+    bot.infinity_polling()
+
 
 
 
