@@ -1,10 +1,7 @@
-Flask
-gunicorn
-pyTelegramBotAPI
-requests
-numpy
-pandas
-
+Flask==3.1.0
+pyTelegramBotAPI==4.14.0
+gunicorn==21.2.0
+requests==2.31.0
 
 
 
