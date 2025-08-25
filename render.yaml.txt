@@ -5,6 +5,15 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn index:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: BOT_TOKEN
+        value: 7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q
+      - key: WEBHOOK_URL
+        value: https://momybott-4.onrender.com/7638935379:AAEmLD7JHLZ36Ywh5tvmlP1F8xzrcNrym_Q
+      - key: CHAT_ID
+        value: "1263295916"
+
+
 
 
 
